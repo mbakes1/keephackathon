@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import { BarChart3, Package, PlusCircle, AlertTriangle, ArrowUpCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { supabase } from '../lib/supabase/supabase';
+import { useAuth } from '../context/AuthContext';
 import { formatCurrency } from '../lib/utils';
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [stats, setStats] = useState({
     totalAssets: 0,
     assignedAssets: 0,
@@ -16,51 +18,74 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      setLoading(true);
-      
-      try {
-        // Fetch asset stats
-        const { data: assets, error: assetsError } = await supabase
-          .from('assets')
-          .select('*');
-          
-        if (assetsError) throw assetsError;
-        
-        if (assets) {
-          const assigned = assets.filter(a => a.status === 'assigned').length;
-          const maintenance = assets.filter(a => a.status === 'maintenance').length;
-          const totalValue = assets.reduce((sum, asset) => sum + (asset.asset_value_zar || 0), 0);
-          
-          setStats({
-            totalAssets: assets.length,
-            assignedAssets: assigned,
-            maintenanceAssets: maintenance,
-            totalValue,
-          });
-        }
-        
-        // Fetch recent assets
-        const { data: recent, error: recentError } = await supabase
-          .from('assets')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(5);
-          
-        if (recentError) throw recentError;
-        
-        if (recent) {
-          setRecentAssets(recent);
-        }
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (user?.id) {
+      fetchDashboardData();
+    }
+  }, [user?.id]);
+
+  const fetchDashboardData = async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     
-    fetchDashboardData();
-  }, []);
+    try {
+      // Fetch asset stats with user filter
+      const { data: assets, error: assetsError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('owner_id', user.id);
+        
+      if (assetsError) {
+        console.error('Assets fetch error:', assetsError);
+        throw assetsError;
+      }
+      
+      if (assets) {
+        const assigned = assets.filter(a => a.status === 'assigned').length;
+        const maintenance = assets.filter(a => a.status === 'maintenance').length;
+        const totalValue = assets.reduce((sum, asset) => sum + (asset.asset_value_zar || 0), 0);
+        
+        setStats({
+          totalAssets: assets.length,
+          assignedAssets: assigned,
+          maintenanceAssets: maintenance,
+          totalValue,
+        });
+      }
+      
+      // Fetch recent assets with user filter
+      const { data: recent, error: recentError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+        
+      if (recentError) {
+        console.error('Recent assets fetch error:', recentError);
+        throw recentError;
+      }
+      
+      if (recent) {
+        setRecentAssets(recent);
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      // Set empty state instead of leaving in loading state
+      setStats({
+        totalAssets: 0,
+        assignedAssets: 0,
+        maintenanceAssets: 0,
+        totalValue: 0,
+      });
+      setRecentAssets([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const statItems = [
     {
