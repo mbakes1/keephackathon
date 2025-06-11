@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Pencil, Trash2, ArrowLeft, User } from 'lucide-react';
+import { Pencil, Trash2, ArrowLeft, User, MapPin, Calendar, DollarSign } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import AssetQRCode from '../../components/assets/AssetQRCode';
+import InsuranceTracker from '../../components/assets/InsuranceTracker';
+import AssetNotes from '../../components/assets/AssetNotes';
 import { supabase } from '../../lib/supabase/supabase';
-import { formatCurrency, formatDate, statusColors } from '../../lib/utils';
+import { useAuth } from '../../context/AuthContext';
+import { formatCurrency, formatDate } from '../../lib/utils';
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [asset, setAsset] = useState<any>(null);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +31,7 @@ export default function AssetDetail() {
           .from('assets')
           .select('*')
           .eq('id', id)
+          .eq('owner_id', user?.id)
           .single();
           
         if (assetError) throw assetError;
@@ -59,7 +64,7 @@ export default function AssetDetail() {
     };
     
     fetchAssetDetails();
-  }, [id]);
+  }, [id, user?.id]);
 
   const handleDelete = async () => {
     if (!id) return;
@@ -69,7 +74,8 @@ export default function AssetDetail() {
       const { error } = await supabase
         .from('assets')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .eq('owner_id', user?.id);
         
       if (error) throw error;
       
@@ -157,8 +163,9 @@ export default function AssetDetail() {
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          {/* Asset Details */}
           <div className="bg-white shadow-sm rounded-lg overflow-hidden">
             <div className="px-4 py-5 sm:px-6 border-b border-slate-200">
               <h3 className="text-lg font-medium text-slate-900">Asset Details</h3>
@@ -171,30 +178,66 @@ export default function AssetDetail() {
                 </div>
                 
                 <div>
+                  <h4 className="text-sm font-medium text-slate-500">Condition</h4>
+                  <p className="mt-1 text-sm text-slate-900 capitalize">{asset.asset_condition || 'Not specified'}</p>
+                </div>
+                
+                <div>
                   <h4 className="text-sm font-medium text-slate-500">Serial Number</h4>
                   <p className="mt-1 text-sm text-slate-900">{asset.serial_number || 'N/A'}</p>
                 </div>
                 
                 <div>
-                  <h4 className="text-sm font-medium text-slate-500">Purchase Date</h4>
-                  <p className="mt-1 text-sm text-slate-900">{asset.purchase_date ? formatDate(asset.purchase_date) : 'N/A'}</p>
+                  <h4 className="text-sm font-medium text-slate-500">VIN/Identifier</h4>
+                  <p className="mt-1 text-sm text-slate-900">{asset.vin_identifier || 'N/A'}</p>
                 </div>
                 
                 <div>
-                  <h4 className="text-sm font-medium text-slate-500">Value</h4>
-                  <p className="mt-1 text-sm text-slate-900">{asset.value ? formatCurrency(asset.value) : 'N/A'}</p>
+                  <h4 className="text-sm font-medium text-slate-500">Purchase Date</h4>
+                  <div className="flex items-center mt-1">
+                    <Calendar className="h-4 w-4 text-slate-400 mr-1" />
+                    <p className="text-sm text-slate-900">{asset.purchase_date ? formatDate(asset.purchase_date) : 'N/A'}</p>
+                  </div>
                 </div>
                 
-                <div className="sm:col-span-2">
-                  <h4 className="text-sm font-medium text-slate-500">Description</h4>
-                  <p className="mt-1 text-sm text-slate-900">{asset.description || 'No description provided'}</p>
+                <div>
+                  <h4 className="text-sm font-medium text-slate-500">Value (ZAR)</h4>
+                  <div className="flex items-center mt-1">
+                    <DollarSign className="h-4 w-4 text-slate-400 mr-1" />
+                    <p className="text-sm text-slate-900">
+                      {asset.asset_value_zar ? `R ${asset.asset_value_zar.toLocaleString()}` : 'N/A'}
+                    </p>
+                  </div>
                 </div>
+                
+                {asset.asset_location && (
+                  <div className="sm:col-span-2">
+                    <h4 className="text-sm font-medium text-slate-500">Location</h4>
+                    <div className="flex items-center mt-1">
+                      <MapPin className="h-4 w-4 text-slate-400 mr-1" />
+                      <p className="text-sm text-slate-900">{asset.asset_location}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {asset.description && (
+                  <div className="sm:col-span-2">
+                    <h4 className="text-sm font-medium text-slate-500">Description</h4>
+                    <p className="mt-1 text-sm text-slate-900">{asset.description}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
           
+          {/* Insurance Tracker */}
+          <InsuranceTracker assetId={asset.id} />
+          
+          {/* Asset Notes */}
+          <AssetNotes assetId={asset.id} />
+          
           {/* Assignment History */}
-          <div className="mt-6 bg-white shadow-sm rounded-lg overflow-hidden">
+          <div className="bg-white shadow-sm rounded-lg overflow-hidden">
             <div className="px-4 py-5 sm:px-6 border-b border-slate-200">
               <h3 className="text-lg font-medium text-slate-900">Assignment History</h3>
             </div>
@@ -258,7 +301,7 @@ export default function AssetDetail() {
         </div>
         
         {/* QR Code */}
-        <div className="md:col-span-1">
+        <div className="lg:col-span-1">
           <AssetQRCode assetId={asset.id} assetName={asset.name} />
         </div>
       </div>

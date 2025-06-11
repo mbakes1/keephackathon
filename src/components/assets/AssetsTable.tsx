@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Search, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, MapPin, Calendar, DollarSign } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { supabase } from '../../lib/supabase/supabase';
+import { useAuth } from '../../context/AuthContext';
 
 type Asset = {
   id: string;
@@ -13,31 +14,39 @@ type Asset = {
   category: string;
   description: string | null;
   serial_number: string | null;
+  vin_identifier: string | null;
   purchase_date: string | null;
   value: number | null;
+  asset_value_zar: number | null;
   status: 'available' | 'assigned' | 'maintenance' | 'retired';
+  asset_location: string | null;
+  asset_condition: string | null;
   created_at: string;
 };
 
 type AssetFilterProps = {
   categories: string[];
   statuses: string[];
+  conditions: string[];
   onFilterChange: (filters: any) => void;
 };
 
-function AssetFilters({ categories, statuses, onFilterChange }: AssetFilterProps) {
+function AssetFilters({ categories, statuses, conditions, onFilterChange }: AssetFilterProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedCondition, setSelectedCondition] = useState<string>('');
 
-  const handleCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedCategory(e.target.value);
-    onFilterChange({ category: e.target.value, status: selectedStatus });
+  const handleFilterChange = () => {
+    onFilterChange({ 
+      category: selectedCategory, 
+      status: selectedStatus,
+      condition: selectedCondition 
+    });
   };
 
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedStatus(e.target.value);
-    onFilterChange({ category: selectedCategory, status: e.target.value });
-  };
+  useEffect(() => {
+    handleFilterChange();
+  }, [selectedCategory, selectedStatus, selectedCondition]);
 
   return (
     <div className="flex flex-col sm:flex-row gap-4">
@@ -48,7 +57,7 @@ function AssetFilters({ categories, statuses, onFilterChange }: AssetFilterProps
         <select
           id="category"
           value={selectedCategory}
-          onChange={handleCategoryChange}
+          onChange={(e) => setSelectedCategory(e.target.value)}
           className="block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
         >
           <option value="">All Categories</option>
@@ -59,6 +68,7 @@ function AssetFilters({ categories, statuses, onFilterChange }: AssetFilterProps
           ))}
         </select>
       </div>
+      
       <div className="w-full sm:w-48">
         <label htmlFor="status" className="block text-sm font-medium text-slate-700 mb-1">
           Status
@@ -66,7 +76,7 @@ function AssetFilters({ categories, statuses, onFilterChange }: AssetFilterProps
         <select
           id="status"
           value={selectedStatus}
-          onChange={handleStatusChange}
+          onChange={(e) => setSelectedStatus(e.target.value)}
           className="block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
         >
           <option value="">All Statuses</option>
@@ -77,18 +87,38 @@ function AssetFilters({ categories, statuses, onFilterChange }: AssetFilterProps
           ))}
         </select>
       </div>
+      
+      <div className="w-full sm:w-48">
+        <label htmlFor="condition" className="block text-sm font-medium text-slate-700 mb-1">
+          Condition
+        </label>
+        <select
+          id="condition"
+          value={selectedCondition}
+          onChange={(e) => setSelectedCondition(e.target.value)}
+          className="block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+        >
+          <option value="">All Conditions</option>
+          {conditions.map((condition) => (
+            <option key={condition} value={condition}>
+              {condition.charAt(0).toUpperCase() + condition.slice(1)}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
 
 export default function AssetsTable() {
+  const { user } = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
-  const [filters, setFilters] = useState({ category: '', status: '' });
+  const [filters, setFilters] = useState({ category: '', status: '', condition: '' });
 
   useEffect(() => {
     const fetchAssets = async () => {
@@ -97,6 +127,7 @@ export default function AssetsTable() {
         const { data, error } = await supabase
           .from('assets')
           .select('*')
+          .eq('owner_id', user?.id)
           .order('created_at', { ascending: false });
           
         if (error) throw error;
@@ -116,8 +147,10 @@ export default function AssetsTable() {
       }
     };
     
-    fetchAssets();
-  }, []);
+    if (user?.id) {
+      fetchAssets();
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     // Apply filters and search
@@ -128,7 +161,9 @@ export default function AssetsTable() {
         asset =>
           asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           asset.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          asset.serial_number?.toLowerCase().includes(searchQuery.toLowerCase())
+          asset.serial_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          asset.vin_identifier?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          asset.asset_location?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
     
@@ -138,6 +173,10 @@ export default function AssetsTable() {
     
     if (filters.status) {
       result = result.filter(asset => asset.status === filters.status);
+    }
+    
+    if (filters.condition) {
+      result = result.filter(asset => asset.asset_condition === filters.condition);
     }
     
     setFilteredAssets(result);
@@ -152,6 +191,7 @@ export default function AssetsTable() {
   };
 
   const statuses = ['available', 'assigned', 'maintenance', 'retired'];
+  const conditions = ['excellent', 'good', 'fair', 'poor'];
 
   return (
     <div className="space-y-4">
@@ -183,6 +223,7 @@ export default function AssetsTable() {
           <AssetFilters
             categories={categories}
             statuses={statuses}
+            conditions={conditions}
             onFilterChange={handleFilterChange}
           />
         </div>
@@ -200,58 +241,107 @@ export default function AssetsTable() {
               <thead className="bg-slate-50">
                 <tr>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Name
+                    Asset Details
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Category
+                    Category & Condition
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Serial Number
+                    Identifiers
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Purchase Date
+                    Value & Date
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Value
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                    Status
+                    Location & Status
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-slate-200">
                 {filteredAssets.map((asset) => (
                   <tr key={asset.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <Link 
-                        to={`/assets/${asset.id}`}
-                        className="font-medium text-blue-600 hover:text-blue-900"
-                      >
-                        {asset.name}
-                      </Link>
+                    <td className="px-6 py-4">
+                      <div>
+                        <Link 
+                          to={`/assets/${asset.id}`}
+                          className="font-medium text-blue-600 hover:text-blue-900 block"
+                        >
+                          {asset.name}
+                        </Link>
+                        {asset.description && (
+                          <p className="text-sm text-slate-500 mt-1 truncate max-w-xs">
+                            {asset.description}
+                          </p>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {asset.category}
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        <p className="text-sm text-slate-900">{asset.category}</p>
+                        {asset.asset_condition && (
+                          <Badge 
+                            variant={
+                              asset.asset_condition === 'excellent' ? 'success' :
+                              asset.asset_condition === 'good' ? 'default' :
+                              asset.asset_condition === 'fair' ? 'warning' : 'destructive'
+                            }
+                            className="text-xs"
+                          >
+                            {asset.asset_condition.charAt(0).toUpperCase() + asset.asset_condition.slice(1)}
+                          </Badge>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {asset.serial_number || '-'}
+                    <td className="px-6 py-4">
+                      <div className="space-y-1 text-sm text-slate-500">
+                        {asset.serial_number && (
+                          <p>SN: {asset.serial_number}</p>
+                        )}
+                        {asset.vin_identifier && (
+                          <p>VIN: {asset.vin_identifier}</p>
+                        )}
+                        {!asset.serial_number && !asset.vin_identifier && (
+                          <p>-</p>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {asset.purchase_date ? formatDate(asset.purchase_date) : '-'}
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        {asset.asset_value_zar && (
+                          <div className="flex items-center text-sm text-slate-900">
+                            <DollarSign className="h-3 w-3 mr-1" />
+                            R {asset.asset_value_zar.toLocaleString()}
+                          </div>
+                        )}
+                        {asset.purchase_date && (
+                          <div className="flex items-center text-sm text-slate-500">
+                            <Calendar className="h-3 w-3 mr-1" />
+                            {formatDate(asset.purchase_date)}
+                          </div>
+                        )}
+                        {!asset.asset_value_zar && !asset.purchase_date && (
+                          <p className="text-sm text-slate-500">-</p>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {asset.value ? formatCurrency(asset.value) : '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <Badge
-                        variant={
-                          asset.status === 'available' ? 'success' :
-                          asset.status === 'assigned' ? 'default' :
-                          asset.status === 'maintenance' ? 'warning' : 'secondary'
-                        }
-                      >
-                        {asset.status.charAt(0).toUpperCase() + asset.status.slice(1)}
-                      </Badge>
+                    <td className="px-6 py-4">
+                      <div className="space-y-2">
+                        {asset.asset_location && (
+                          <div className="flex items-center text-sm text-slate-500">
+                            <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
+                            <span className="truncate max-w-xs">{asset.asset_location}</span>
+                          </div>
+                        )}
+                        <Badge
+                          variant={
+                            asset.status === 'available' ? 'success' :
+                            asset.status === 'assigned' ? 'default' :
+                            asset.status === 'maintenance' ? 'warning' : 'secondary'
+                          }
+                        >
+                          {asset.status.charAt(0).toUpperCase() + asset.status.slice(1)}
+                        </Badge>
+                      </div>
                     </td>
                   </tr>
                 ))}
