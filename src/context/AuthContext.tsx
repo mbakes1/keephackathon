@@ -53,27 +53,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const getSession = async () => {
       setLoading(true);
       
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-        await ensureProfileExists(session.user);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+          await ensureProfileExists(session.user);
+          setSession(session);
+          setUser(session.user);
+        } else {
+          // Clear any stale tokens when no valid session is found
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Error getting session:', error);
+        // Clear stale tokens on error
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
       }
       
-      setSession(session);
-      setUser(session?.user ?? null);
       setLoading(false);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session?.user) {
-          await ensureProfileExists(session.user);
+      async (event, session) => {
+        try {
+          if (session?.user && event !== 'SIGNED_OUT' && event !== 'USER_DELETED') {
+            await ensureProfileExists(session.user);
+            setSession(session);
+            setUser(session.user);
+          } else {
+            // Clear stale tokens when session becomes invalid or user signs out
+            if (event !== 'SIGNED_OUT' && event !== 'USER_DELETED') {
+              await supabase.auth.signOut();
+            }
+            setSession(null);
+            setUser(null);
+          }
+        } catch (error) {
+          console.error('Error in auth state change:', error);
+          // Clear stale tokens on error
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
         }
         
-        setSession(session);
-        setUser(session?.user ?? null);
         setLoading(false);
       }
     );
