@@ -18,21 +18,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const ensureProfileExists = async (user: User) => {
+    try {
+      // Check if profile already exists
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // Profile doesn't exist, create it
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert({
+            id: user.id,
+            email: user.email || '',
+            full_name: user.user_metadata?.full_name || user.user_metadata?.name || '',
+            role: 'admin', // Default role for users
+          });
+
+        if (insertError) {
+          console.error('Error creating profile:', insertError);
+        }
+      } else if (fetchError) {
+        console.error('Error checking profile:', fetchError);
+      }
+    } catch (error) {
+      console.error('Error ensuring profile exists:', error);
+    }
+  };
+
   useEffect(() => {
     const getSession = async () => {
       setLoading(true);
       
       const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        await ensureProfileExists(session.user);
+      }
+      
       setSession(session);
       setUser(session?.user ?? null);
-      
       setLoading(false);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      async (_event, session) => {
+        if (session?.user) {
+          await ensureProfileExists(session.user);
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
