@@ -73,6 +73,8 @@ export default function AssetForm({ assetId }: AssetFormProps) {
   }, [isEditMode, assetId]);
 
   const fetchAssetDetails = async () => {
+    if (!assetId) return;
+    
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -165,23 +167,51 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     }
   };
 
+  const validateForm = () => {
+    if (!formData.name.trim()) {
+      setError('Asset name is required');
+      return false;
+    }
+    
+    if (!formData.category.trim()) {
+      setError('Category is required');
+      return false;
+    }
+    
+    if (!user?.id) {
+      setError('User not authenticated');
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    
+    // Prevent double submission
+    if (loading) return;
+    
     setError(null);
+    
+    if (!validateForm()) {
+      return;
+    }
+    
+    setLoading(true);
     
     try {
       const assetData = {
-        name: formData.name,
-        category: formData.category,
-        description: formData.description || null,
-        serial_number: formData.serial_number || null,
-        vin_identifier: formData.vin_identifier || null,
+        name: formData.name.trim(),
+        category: formData.category.trim(),
+        description: formData.description.trim() || null,
+        serial_number: formData.serial_number.trim() || null,
+        vin_identifier: formData.vin_identifier.trim() || null,
         purchase_date: formData.purchase_date || null,
         value: formData.value ? parseFloat(formData.value) : null,
         asset_value_zar: formData.asset_value_zar ? parseFloat(formData.asset_value_zar) : null,
         status: formData.status,
-        asset_location: formData.asset_location || null,
+        asset_location: formData.asset_location.trim() || null,
         asset_condition: formData.asset_condition,
         custom_fields: formData.custom_fields,
         owner_id: user?.id,
@@ -193,18 +223,34 @@ export default function AssetForm({ assetId }: AssetFormProps) {
         const { data, error } = await supabase
           .from('assets')
           .insert([assetData])
-          .select();
+          .select()
+          .single();
           
-        if (error) throw error;
-        assetResult = data?.[0];
+        if (error) {
+          console.error('Supabase error:', error);
+          throw new Error(error.message || 'Failed to create asset');
+        }
+        
+        assetResult = data;
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('assets')
           .update(assetData)
-          .eq('id', assetId);
+          .eq('id', assetId)
+          .eq('owner_id', user?.id)
+          .select()
+          .single();
           
-        if (error) throw error;
-        assetResult = { id: assetId };
+        if (error) {
+          console.error('Supabase error:', error);
+          throw new Error(error.message || 'Failed to update asset');
+        }
+        
+        assetResult = data;
+      }
+      
+      if (!assetResult) {
+        throw new Error('No data returned from database');
       }
       
       // Handle file uploads (in a real app, you'd upload to Supabase Storage)
@@ -217,11 +263,14 @@ export default function AssetForm({ assetId }: AssetFormProps) {
         console.log('Photos to upload:', uploadedPhotos);
       }
       
+      // Navigate to the asset detail page
       navigate(`/assets/${assetResult.id}`);
+      
     } catch (error: any) {
       console.error('Error saving asset:', error);
-      setError(error.message || 'Error saving asset');
+      setError(error.message || 'An unexpected error occurred while saving the asset');
     } finally {
+      // Always reset loading state
       setLoading(false);
     }
   };
@@ -626,7 +675,7 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     </div>
   );
 
-  if (loading && isEditMode) {
+  if (loading && isEditMode && !formData.name) {
     return (
       <div className="flex justify-center p-8">
         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-slate-200 border-t-blue-600"></div>
@@ -656,13 +705,14 @@ export default function AssetForm({ assetId }: AssetFormProps) {
           type="button" 
           variant="outline" 
           onClick={currentStep === 'basic' ? () => navigate('/assets') : prevStep}
+          disabled={loading}
         >
           {currentStep === 'basic' ? 'Cancel' : 'Previous'}
         </Button>
         
         <div className="flex space-x-3">
           {currentStep !== 'review' ? (
-            <Button type="button" onClick={nextStep}>
+            <Button type="button" onClick={nextStep} disabled={loading}>
               Next
             </Button>
           ) : (
