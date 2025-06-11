@@ -145,6 +145,37 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     e.target.value = '';
   };
 
+  // Helper function to perform the actual upload to Supabase storage
+  const performUpload = async (file: File, type: 'documents' | 'photos', assetId: string, userId: string) => {
+    try {
+      let result;
+      if (type === 'photos') {
+        result = await StorageService.uploadPhoto(file, assetId, userId);
+      } else {
+        result = await StorageService.uploadDocument(file, assetId, userId);
+      }
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      return {
+        success: true,
+        url: result.url,
+        path: result.path,
+        error: undefined
+      };
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      return {
+        success: false,
+        url: undefined,
+        path: undefined,
+        error: error.message || 'Upload failed'
+      };
+    }
+  };
+
   const uploadFile = async (fileIndex: number, type: 'documents' | 'photos') => {
     if (!user?.id) return;
 
@@ -159,39 +190,19 @@ export default function AssetForm({ assetId }: AssetFormProps) {
       i === fileIndex ? { ...f, uploading: true, error: undefined } : f
     ));
 
-    try {
-      let result;
-      if (type === 'photos') {
-        result = await StorageService.uploadPhoto(fileToUpload.file, assetId || 'temp', user.id);
-      } else {
-        result = await StorageService.uploadDocument(fileToUpload.file, assetId || 'temp', user.id);
-      }
+    const result = await performUpload(fileToUpload.file, type, assetId || 'temp', user.id);
 
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      // Update uploaded state
-      setFiles(prev => prev.map((f, i) => 
-        i === fileIndex ? { 
-          ...f, 
-          uploading: false, 
-          uploaded: true, 
-          url: result.url,
-          path: result.path 
-        } : f
-      ));
-    } catch (error: any) {
-      console.error('Upload error:', error);
-      setFiles(prev => prev.map((f, i) => 
-        i === fileIndex ? { 
-          ...f, 
-          uploading: false, 
-          uploaded: false, 
-          error: error.message || 'Upload failed' 
-        } : f
-      ));
-    }
+    // Update final state
+    setFiles(prev => prev.map((f, i) => 
+      i === fileIndex ? { 
+        ...f, 
+        uploading: false, 
+        uploaded: result.success, 
+        url: result.url,
+        path: result.path,
+        error: result.error
+      } : f
+    ));
   };
 
   const removeFile = (index: number, type: 'documents' | 'photos') => {
@@ -254,8 +265,8 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     return true;
   };
 
-  const saveAssetPhotos = async (assetId: string) => {
-    const uploadedPhotoFiles = uploadedPhotos.filter(p => p.uploaded && p.url);
+  const saveAssetPhotos = async (assetId: string, photoFiles: UploadedFile[]) => {
+    const uploadedPhotoFiles = photoFiles.filter(p => p.uploaded && p.url);
     
     for (const photo of uploadedPhotoFiles) {
       try {
@@ -274,8 +285,8 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     }
   };
 
-  const saveAssetDocuments = async (assetId: string) => {
-    const uploadedDocumentFiles = uploadedFiles.filter(d => d.uploaded && d.url);
+  const saveAssetDocuments = async (assetId: string, documentFiles: UploadedFile[]) => {
+    const uploadedDocumentFiles = documentFiles.filter(d => d.uploaded && d.url);
     
     for (const doc of uploadedDocumentFiles) {
       try {
@@ -361,29 +372,67 @@ export default function AssetForm({ assetId }: AssetFormProps) {
         throw new Error('No data returned from database');
       }
 
-      // Upload files that haven't been uploaded yet
-      const photosToUpload = uploadedPhotos.filter(p => !p.uploaded && !p.uploading);
-      const documentsToUpload = uploadedFiles.filter(d => !d.uploaded && !d.uploading);
+      // Create mutable copies of the file arrays
+      const mutablePhotos = [...uploadedPhotos];
+      const mutableDocuments = [...uploadedFiles];
 
-      // Upload remaining photos
-      for (let i = 0; i < photosToUpload.length; i++) {
-        const photoIndex = uploadedPhotos.findIndex(p => p === photosToUpload[i]);
-        if (photoIndex !== -1) {
-          await uploadFile(photoIndex, 'photos');
-        }
-      }
+      // Identify files that need uploading
+      const photosToUpload = mutablePhotos
+        .map((photo, index) => ({ photo, index }))
+        .filter(({ photo }) => !photo.uploaded && !photo.uploading);
+      
+      const documentsToUpload = mutableDocuments
+        .map((doc, index) => ({ doc, index }))
+        .filter(({ doc }) => !doc.uploaded && !doc.uploading);
 
-      // Upload remaining documents
-      for (let i = 0; i < documentsToUpload.length; i++) {
-        const docIndex = uploadedFiles.findIndex(d => d === documentsToUpload[i]);
-        if (docIndex !== -1) {
-          await uploadFile(docIndex, 'documents');
-        }
-      }
+      // Mark files as uploading in mutable copies
+      photosToUpload.forEach(({ index }) => {
+        mutablePhotos[index] = { ...mutablePhotos[index], uploading: true, error: undefined };
+      });
+      
+      documentsToUpload.forEach(({ index }) => {
+        mutableDocuments[index] = { ...mutableDocuments[index], uploading: true, error: undefined };
+      });
 
-      // Save photo and document records to database
-      await saveAssetPhotos(assetResult.id);
-      await saveAssetDocuments(assetResult.id);
+      // Update state to show uploading status
+      setUploadedPhotos([...mutablePhotos]);
+      setUploadedFiles([...mutableDocuments]);
+
+      // Upload all pending files concurrently
+      const photoUploadPromises = photosToUpload.map(async ({ photo, index }) => {
+        const result = await performUpload(photo.file, 'photos', assetResult.id, user!.id);
+        mutablePhotos[index] = {
+          ...mutablePhotos[index],
+          uploading: false,
+          uploaded: result.success,
+          url: result.url,
+          path: result.path,
+          error: result.error
+        };
+      });
+
+      const documentUploadPromises = documentsToUpload.map(async ({ doc, index }) => {
+        const result = await performUpload(doc.file, 'documents', assetResult.id, user!.id);
+        mutableDocuments[index] = {
+          ...mutableDocuments[index],
+          uploading: false,
+          uploaded: result.success,
+          url: result.url,
+          path: result.path,
+          error: result.error
+        };
+      });
+
+      // Wait for all uploads to complete
+      await Promise.all([...photoUploadPromises, ...documentUploadPromises]);
+
+      // Update state with final results
+      setUploadedPhotos([...mutablePhotos]);
+      setUploadedFiles([...mutableDocuments]);
+
+      // Save photo and document records to database using the updated mutable arrays
+      await saveAssetPhotos(assetResult.id, mutablePhotos);
+      await saveAssetDocuments(assetResult.id, mutableDocuments);
       
       // Navigate to the asset detail page
       navigate(`/assets/${assetResult.id}`);
