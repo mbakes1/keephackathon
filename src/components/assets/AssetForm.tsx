@@ -2,15 +2,25 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
-import { Upload, X, Plus } from 'lucide-react';
+import { Upload, X, Plus, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { StorageService } from '../../lib/storage';
 
 type AssetFormProps = {
   assetId?: string;
 };
 
 type FormStep = 'basic' | 'details' | 'documents' | 'review';
+
+type UploadedFile = {
+  file: File;
+  uploading: boolean;
+  uploaded: boolean;
+  error?: string;
+  url?: string;
+  path?: string;
+};
 
 export default function AssetForm({ assetId }: AssetFormProps) {
   const navigate = useNavigate();
@@ -34,8 +44,8 @@ export default function AssetForm({ assetId }: AssetFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [newCategory, setNewCategory] = useState('');
   const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [uploadedPhotos, setUploadedPhotos] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedPhotos, setUploadedPhotos] = useState<UploadedFile[]>([]);
 
   const isEditMode = !!assetId;
 
@@ -115,12 +125,72 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     }));
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'documents' | 'photos') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'documents' | 'photos') => {
     const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const newFiles: UploadedFile[] = files.map(file => ({
+      file,
+      uploading: false,
+      uploaded: false,
+    }));
+
     if (type === 'documents') {
-      setUploadedFiles(prev => [...prev, ...files]);
+      setUploadedFiles(prev => [...prev, ...newFiles]);
     } else {
-      setUploadedPhotos(prev => [...prev, ...files]);
+      setUploadedPhotos(prev => [...prev, ...newFiles]);
+    }
+
+    // Clear the input
+    e.target.value = '';
+  };
+
+  const uploadFile = async (fileIndex: number, type: 'documents' | 'photos') => {
+    if (!user?.id) return;
+
+    const files = type === 'documents' ? uploadedFiles : uploadedPhotos;
+    const setFiles = type === 'documents' ? setUploadedFiles : setUploadedPhotos;
+    
+    const fileToUpload = files[fileIndex];
+    if (!fileToUpload || fileToUpload.uploading || fileToUpload.uploaded) return;
+
+    // Update uploading state
+    setFiles(prev => prev.map((f, i) => 
+      i === fileIndex ? { ...f, uploading: true, error: undefined } : f
+    ));
+
+    try {
+      let result;
+      if (type === 'photos') {
+        result = await StorageService.uploadPhoto(fileToUpload.file, assetId || 'temp', user.id);
+      } else {
+        result = await StorageService.uploadDocument(fileToUpload.file, assetId || 'temp', user.id);
+      }
+
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Update uploaded state
+      setFiles(prev => prev.map((f, i) => 
+        i === fileIndex ? { 
+          ...f, 
+          uploading: false, 
+          uploaded: true, 
+          url: result.url,
+          path: result.path 
+        } : f
+      ));
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setFiles(prev => prev.map((f, i) => 
+        i === fileIndex ? { 
+          ...f, 
+          uploading: false, 
+          uploaded: false, 
+          error: error.message || 'Upload failed' 
+        } : f
+      ));
     }
   };
 
@@ -182,6 +252,47 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     }
     
     return true;
+  };
+
+  const saveAssetPhotos = async (assetId: string) => {
+    const uploadedPhotoFiles = uploadedPhotos.filter(p => p.uploaded && p.url);
+    
+    for (const photo of uploadedPhotoFiles) {
+      try {
+        await supabase
+          .from('asset_photos')
+          .insert({
+            asset_id: assetId,
+            owner_id: user?.id!,
+            photo_url: photo.url!,
+            photo_description: photo.file.name,
+            is_primary: uploadedPhotoFiles.indexOf(photo) === 0, // First photo is primary
+          });
+      } catch (error) {
+        console.error('Error saving photo record:', error);
+      }
+    }
+  };
+
+  const saveAssetDocuments = async (assetId: string) => {
+    const uploadedDocumentFiles = uploadedFiles.filter(d => d.uploaded && d.url);
+    
+    for (const doc of uploadedDocumentFiles) {
+      try {
+        await supabase
+          .from('asset_documents')
+          .insert({
+            asset_id: assetId,
+            owner_id: user?.id!,
+            document_name: doc.file.name,
+            document_type: 'other', // Default type, could be enhanced with type detection
+            file_url: doc.url!,
+            file_size: doc.file.size,
+          });
+      } catch (error) {
+        console.error('Error saving document record:', error);
+      }
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -249,16 +360,30 @@ export default function AssetForm({ assetId }: AssetFormProps) {
       if (!assetResult) {
         throw new Error('No data returned from database');
       }
-      
-      // Handle file uploads (in a real app, you'd upload to Supabase Storage)
-      // For now, we'll just log the files
-      if (uploadedFiles.length > 0) {
-        console.log('Documents to upload:', uploadedFiles);
+
+      // Upload files that haven't been uploaded yet
+      const photosToUpload = uploadedPhotos.filter(p => !p.uploaded && !p.uploading);
+      const documentsToUpload = uploadedFiles.filter(d => !d.uploaded && !d.uploading);
+
+      // Upload remaining photos
+      for (let i = 0; i < photosToUpload.length; i++) {
+        const photoIndex = uploadedPhotos.findIndex(p => p === photosToUpload[i]);
+        if (photoIndex !== -1) {
+          await uploadFile(photoIndex, 'photos');
+        }
       }
-      
-      if (uploadedPhotos.length > 0) {
-        console.log('Photos to upload:', uploadedPhotos);
+
+      // Upload remaining documents
+      for (let i = 0; i < documentsToUpload.length; i++) {
+        const docIndex = uploadedFiles.findIndex(d => d === documentsToUpload[i]);
+        if (docIndex !== -1) {
+          await uploadFile(docIndex, 'documents');
+        }
       }
+
+      // Save photo and document records to database
+      await saveAssetPhotos(assetResult.id);
+      await saveAssetDocuments(assetResult.id);
       
       // Navigate to the asset detail page
       navigate(`/assets/${assetResult.id}`);
@@ -529,93 +654,109 @@ export default function AssetForm({ assetId }: AssetFormProps) {
     </div>
   );
 
-  const renderDocumentsStep = () => (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-slate-900">Upload Asset Photos</h3>
-        <p className="text-sm text-slate-500">Upload photos of your asset for identification purposes.</p>
-        
-        <div className="mt-4">
-          <label className="block">
-            <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-slate-400 transition-colors cursor-pointer">
-              <Upload className="mx-auto h-12 w-12 text-slate-400" />
-              <p className="mt-2 text-sm text-slate-600">Click to upload photos</p>
-              <p className="text-xs text-slate-500">PNG, JPG up to 10MB each</p>
-            </div>
-            <input
-              type="file"
-              multiple
-              accept="image/*"
-              onChange={(e) => handleFileUpload(e, 'photos')}
-              className="hidden"
-            />
-          </label>
-        </div>
-        
-        {uploadedPhotos.length > 0 && (
-          <div className="mt-4">
-            <h4 className="text-sm font-medium text-slate-700">Uploaded Photos:</h4>
-            <div className="mt-2 space-y-2">
-              {uploadedPhotos.map((file, index) => (
-                <div key={index} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                  <span className="text-sm text-slate-600">{file.name}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeFile(index, 'photos')}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
+  const renderFileUploadSection = (
+    title: string,
+    description: string,
+    acceptedTypes: string,
+    files: UploadedFile[],
+    type: 'documents' | 'photos'
+  ) => (
+    <div>
+      <h3 className="text-lg font-medium text-slate-900">{title}</h3>
+      <p className="text-sm text-slate-500">{description}</p>
+      
+      <div className="mt-4">
+        <label className="block">
+          <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-slate-400 transition-colors cursor-pointer">
+            <Upload className="mx-auto h-12 w-12 text-slate-400" />
+            <p className="mt-2 text-sm text-slate-600">Click to upload {type}</p>
+            <p className="text-xs text-slate-500">{acceptedTypes}</p>
           </div>
-        )}
+          <input
+            type="file"
+            multiple
+            accept={type === 'photos' ? 'image/*' : '.pdf,.doc,.docx,.jpg,.jpeg,.png,.txt'}
+            onChange={(e) => handleFileUpload(e, type)}
+            className="hidden"
+          />
+        </label>
       </div>
       
-      <div>
-        <h3 className="text-lg font-medium text-slate-900">Upload Supporting Documents</h3>
-        <p className="text-sm text-slate-500">Upload proof of purchase, warranties, FICA compliance documents, etc.</p>
-        
+      {files.length > 0 && (
         <div className="mt-4">
-          <label className="block">
-            <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-slate-400 transition-colors cursor-pointer">
-              <Upload className="mx-auto h-12 w-12 text-slate-400" />
-              <p className="mt-2 text-sm text-slate-600">Click to upload documents</p>
-              <p className="text-xs text-slate-500">PDF, DOC, DOCX up to 10MB each</p>
-            </div>
-            <input
-              type="file"
-              multiple
-              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-              onChange={(e) => handleFileUpload(e, 'documents')}
-              className="hidden"
-            />
-          </label>
-        </div>
-        
-        {uploadedFiles.length > 0 && (
-          <div className="mt-4">
-            <h4 className="text-sm font-medium text-slate-700">Uploaded Documents:</h4>
-            <div className="mt-2 space-y-2">
-              {uploadedFiles.map((file, index) => (
-                <div key={index} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                  <span className="text-sm text-slate-600">{file.name}</span>
+          <h4 className="text-sm font-medium text-slate-700">Files:</h4>
+          <div className="mt-2 space-y-2">
+            {files.map((fileItem, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded border">
+                <div className="flex items-center space-x-3">
+                  <div className="flex-shrink-0">
+                    {fileItem.uploaded ? (
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                    ) : fileItem.uploading ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
+                    ) : fileItem.error ? (
+                      <AlertCircle className="h-5 w-5 text-red-500" />
+                    ) : (
+                      <div className="h-5 w-5 rounded-full bg-slate-300" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-sm text-slate-600">{fileItem.file.name}</span>
+                    <p className="text-xs text-slate-500">
+                      {(fileItem.file.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                    {fileItem.error && (
+                      <p className="text-xs text-red-600">{fileItem.error}</p>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  {!fileItem.uploaded && !fileItem.uploading && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => uploadFile(index, type)}
+                    >
+                      Upload
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => removeFile(index, 'documents')}
+                    onClick={() => removeFile(index, type)}
+                    disabled={fileItem.uploading}
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderDocumentsStep = () => (
+    <div className="space-y-6">
+      {renderFileUploadSection(
+        'Upload Asset Photos',
+        'Upload photos of your asset for identification purposes.',
+        'PNG, JPG, WebP up to 10MB each',
+        uploadedPhotos,
+        'photos'
+      )}
+      
+      {renderFileUploadSection(
+        'Upload Supporting Documents',
+        'Upload proof of purchase, warranties, FICA compliance documents, etc.',
+        'PDF, DOC, DOCX, images, text files up to 10MB each',
+        uploadedFiles,
+        'documents'
+      )}
     </div>
   );
 
@@ -661,11 +802,17 @@ export default function AssetForm({ assetId }: AssetFormProps) {
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <h4 className="text-sm font-medium text-slate-500">Photos</h4>
-            <p className="text-sm text-slate-900">{uploadedPhotos.length} file(s)</p>
+            <p className="text-sm text-slate-900">
+              {uploadedPhotos.length} file(s) 
+              ({uploadedPhotos.filter(p => p.uploaded).length} uploaded)
+            </p>
           </div>
           <div>
             <h4 className="text-sm font-medium text-slate-500">Documents</h4>
-            <p className="text-sm text-slate-900">{uploadedFiles.length} file(s)</p>
+            <p className="text-sm text-slate-900">
+              {uploadedFiles.length} file(s) 
+              ({uploadedFiles.filter(d => d.uploaded).length} uploaded)
+            </p>
           </div>
         </div>
       </div>
@@ -683,8 +830,11 @@ export default function AssetForm({ assetId }: AssetFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-8">
       {error && (
-        <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-md">
-          {error}
+        <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-md border border-red-200">
+          <div className="flex">
+            <AlertCircle className="h-5 w-5 text-red-400 mr-2 flex-shrink-0" />
+            {error}
+          </div>
         </div>
       )}
       

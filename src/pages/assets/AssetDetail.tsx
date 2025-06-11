@@ -1,21 +1,38 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Pencil, Trash2, ArrowLeft, User, MapPin, Calendar, DollarSign } from 'lucide-react';
+import { Pencil, Trash2, ArrowLeft, User, MapPin, Calendar, DollarSign, Image, FileText } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import AssetQRCode from '../../components/assets/AssetQRCode';
 import InsuranceTracker from '../../components/assets/InsuranceTracker';
 import AssetNotes from '../../components/assets/AssetNotes';
+import AssetAssignments from '../../components/assets/AssetAssignments';
 import { supabase } from '../../lib/supabase/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../lib/utils';
+
+type AssetPhoto = {
+  id: string;
+  photo_url: string;
+  photo_description: string | null;
+  is_primary: boolean | null;
+};
+
+type AssetDocument = {
+  id: string;
+  document_name: string;
+  document_type: string;
+  file_url: string | null;
+  file_size: number | null;
+};
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [asset, setAsset] = useState<any>(null);
-  const [assignments, setAssignments] = useState<any[]>([]);
+  const [photos, setPhotos] = useState<AssetPhoto[]>([]);
+  const [documents, setDocuments] = useState<AssetDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -39,21 +56,33 @@ export default function AssetDetail() {
         if (assetData) {
           setAsset(assetData);
           
-          // Fetch assignment history
-          const { data: assignmentData, error: assignmentError } = await supabase
-            .from('asset_assignments')
-            .select(`
-              *,
-              assigned_to_profile:assigned_to(full_name, email),
-              assigned_by_profile:assigned_by(full_name, email)
-            `)
+          // Fetch asset photos
+          const { data: photoData, error: photoError } = await supabase
+            .from('asset_photos')
+            .select('*')
             .eq('asset_id', id)
-            .order('assigned_date', { ascending: false });
+            .eq('owner_id', user?.id)
+            .order('is_primary', { ascending: false })
+            .order('created_at', { ascending: true });
             
-          if (assignmentError) throw assignmentError;
+          if (photoError) {
+            console.error('Error fetching photos:', photoError);
+          } else if (photoData) {
+            setPhotos(photoData);
+          }
           
-          if (assignmentData) {
-            setAssignments(assignmentData);
+          // Fetch asset documents
+          const { data: documentData, error: documentError } = await supabase
+            .from('asset_documents')
+            .select('*')
+            .eq('asset_id', id)
+            .eq('owner_id', user?.id)
+            .order('created_at', { ascending: false });
+            
+          if (documentError) {
+            console.error('Error fetching documents:', documentError);
+          } else if (documentData) {
+            setDocuments(documentData);
           }
         }
       } catch (error) {
@@ -70,7 +99,7 @@ export default function AssetDetail() {
     if (!id) return;
     
     try {
-      // Delete the asset
+      // Delete the asset (cascade will handle related records)
       const { error } = await supabase
         .from('assets')
         .delete()
@@ -83,6 +112,21 @@ export default function AssetDetail() {
     } catch (error) {
       console.error('Error deleting asset:', error);
     }
+  };
+
+  const handleStatusChange = (newStatus: string) => {
+    setAsset((prev: any) => ({ ...prev, status: newStatus }));
+  };
+
+  const formatFileSize = (bytes: number | null): string => {
+    if (!bytes) return 'Unknown size';
+    if (bytes === 0) return '0 Bytes';
+    
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   if (loading) {
@@ -229,75 +273,100 @@ export default function AssetDetail() {
               </div>
             </div>
           </div>
+
+          {/* Asset Photos */}
+          {photos.length > 0 && (
+            <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+              <div className="px-4 py-5 sm:px-6 border-b border-slate-200">
+                <div className="flex items-center">
+                  <Image className="h-5 w-5 text-blue-600 mr-2" />
+                  <h3 className="text-lg font-medium text-slate-900">Asset Photos</h3>
+                  <span className="ml-2 text-sm text-slate-500">({photos.length})</span>
+                </div>
+              </div>
+              <div className="px-4 py-5 sm:p-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {photos.map((photo) => (
+                    <div key={photo.id} className="relative group">
+                      <div className="aspect-square bg-slate-100 rounded-lg overflow-hidden">
+                        <img
+                          src={photo.photo_url}
+                          alt={photo.photo_description || 'Asset photo'}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                      </div>
+                      {photo.is_primary && (
+                        <div className="absolute top-2 left-2">
+                          <Badge variant="success" className="text-xs">Primary</Badge>
+                        </div>
+                      )}
+                      {photo.photo_description && (
+                        <p className="mt-1 text-xs text-slate-500 truncate">{photo.photo_description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Asset Documents */}
+          {documents.length > 0 && (
+            <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+              <div className="px-4 py-5 sm:px-6 border-b border-slate-200">
+                <div className="flex items-center">
+                  <FileText className="h-5 w-5 text-blue-600 mr-2" />
+                  <h3 className="text-lg font-medium text-slate-900">Documents</h3>
+                  <span className="ml-2 text-sm text-slate-500">({documents.length})</span>
+                </div>
+              </div>
+              <div className="px-4 py-5 sm:p-6">
+                <div className="space-y-3">
+                  {documents.map((document) => (
+                    <div key={document.id} className="flex items-center justify-between p-3 bg-slate-50 rounded border hover:bg-slate-100 transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <FileText className="h-5 w-5 text-slate-400" />
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{document.document_name}</p>
+                          <div className="flex items-center space-x-2 text-xs text-slate-500">
+                            <span className="capitalize">{document.document_type.replace('_', ' ')}</span>
+                            {document.file_size && (
+                              <>
+                                <span>•</span>
+                                <span>{formatFileSize(document.file_size)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {document.file_url && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(document.file_url!, '_blank')}
+                        >
+                          View
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Asset Assignments */}
+          <AssetAssignments 
+            assetId={asset.id} 
+            currentStatus={asset.status}
+            onStatusChange={handleStatusChange}
+          />
           
           {/* Insurance Tracker */}
           <InsuranceTracker assetId={asset.id} />
           
           {/* Asset Notes */}
           <AssetNotes assetId={asset.id} />
-          
-          {/* Assignment History */}
-          <div className="bg-white shadow-sm rounded-lg overflow-hidden">
-            <div className="px-4 py-5 sm:px-6 border-b border-slate-200">
-              <h3 className="text-lg font-medium text-slate-900">Assignment History</h3>
-            </div>
-            <div className="px-4 py-5 sm:p-6">
-              {assignments.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Assigned To
-                        </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Assigned By
-                        </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Assigned Date
-                        </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                          Return Date
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-slate-200">
-                      {assignments.map((assignment) => (
-                        <tr key={assignment.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
-                            <div className="flex items-center">
-                              <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center">
-                                <User className="h-4 w-4 text-slate-500" />
-                              </div>
-                              <div className="ml-3">
-                                <p className="text-sm font-medium text-slate-900">
-                                  {assignment.assigned_to_profile?.full_name || 'Unknown'}
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {assignment.assigned_to_profile?.email}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                            {assignment.assigned_by_profile?.full_name || 'Unknown'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                            {formatDate(assignment.assigned_date)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                            {assignment.return_date ? formatDate(assignment.return_date) : 'Not returned'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500">No assignment history found</p>
-              )}
-            </div>
-          </div>
         </div>
         
         {/* QR Code */}
