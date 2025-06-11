@@ -16,7 +16,6 @@ type Asset = {
   serial_number: string | null;
   vin_identifier: string | null;
   purchase_date: string | null;
-  value: number | null;
   asset_value_zar: number | null;
   status: 'available' | 'assigned' | 'maintenance' | 'retired';
   asset_location: string | null;

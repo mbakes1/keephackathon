@@ -16,9 +16,13 @@ export interface Database {
           category: string
           description: string | null
           serial_number: string | null
+          vin_identifier: string | null
           purchase_date: string | null
-          value: number | null
+          asset_value_zar: number | null
           status: 'available' | 'assigned' | 'maintenance' | 'retired'
+          asset_location: string | null
+          asset_condition: 'excellent' | 'good' | 'fair' | 'poor' | null
+          owner_id: string | null
           created_at: string
           updated_at: string
           custom_fields: Json | null
@@ -30,9 +34,13 @@ export interface Database {
           category: string
           description?: string | null
           serial_number?: string | null
+          vin_identifier?: string | null
           purchase_date?: string | null
-          value?: number | null
+          asset_value_zar?: number | null
           status?: 'available' | 'assigned' | 'maintenance' | 'retired'
+          asset_location?: string | null
+          asset_condition?: 'excellent' | 'good' | 'fair' | 'poor' | null
+          owner_id?: string | null
           created_at?: string
           updated_at?: string
           custom_fields?: Json | null
@@ -44,9 +52,13 @@ export interface Database {
           category?: string
           description?: string | null
           serial_number?: string | null
+          vin_identifier?: string | null
           purchase_date?: string | null
-          value?: number | null
+          asset_value_zar?: number | null
           status?: 'available' | 'assigned' | 'maintenance' | 'retired'
+          asset_location?: string | null
+          asset_condition?: 'excellent' | 'good' | 'fair' | 'poor' | null
+          owner_id?: string | null
           created_at?: string
           updated_at?: string
           custom_fields?: Json | null
@@ -88,23 +100,157 @@ export interface Database {
           created_at?: string
         }
       }
+      asset_notes: {
+        Row: {
+          id: string
+          asset_id: string
+          owner_id: string
+          note_text: string
+          note_category: 'general' | 'maintenance' | 'repairs' | 'modifications' | 'insurance' | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          asset_id: string
+          owner_id: string
+          note_text: string
+          note_category?: 'general' | 'maintenance' | 'repairs' | 'modifications' | 'insurance' | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          asset_id?: string
+          owner_id?: string
+          note_text?: string
+          note_category?: 'general' | 'maintenance' | 'repairs' | 'modifications' | 'insurance' | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+      }
+      asset_insurance: {
+        Row: {
+          id: string
+          asset_id: string
+          owner_id: string
+          is_insured: boolean | null
+          insurance_provider: string | null
+          policy_number: string | null
+          coverage_amount: number | null
+          premium_amount: number | null
+          renewal_date: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          asset_id: string
+          owner_id: string
+          is_insured?: boolean | null
+          insurance_provider?: string | null
+          policy_number?: string | null
+          coverage_amount?: number | null
+          premium_amount?: number | null
+          renewal_date?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          asset_id?: string
+          owner_id?: string
+          is_insured?: boolean | null
+          insurance_provider?: string | null
+          policy_number?: string | null
+          coverage_amount?: number | null
+          premium_amount?: number | null
+          renewal_date?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+      }
+      asset_photos: {
+        Row: {
+          id: string
+          asset_id: string
+          owner_id: string
+          photo_url: string
+          photo_description: string | null
+          is_primary: boolean | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          asset_id: string
+          owner_id: string
+          photo_url: string
+          photo_description?: string | null
+          is_primary?: boolean | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          asset_id?: string
+          owner_id?: string
+          photo_url?: string
+          photo_description?: string | null
+          is_primary?: boolean | null
+          created_at?: string | null
+        }
+      }
+      asset_documents: {
+        Row: {
+          id: string
+          asset_id: string
+          owner_id: string
+          document_name: string
+          document_type: 'proof_of_purchase' | 'insurance_document' | 'warranty' | 'manual' | 'fica_compliance' | 'other'
+          file_url: string | null
+          file_size: number | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          asset_id: string
+          owner_id: string
+          document_name: string
+          document_type: 'proof_of_purchase' | 'insurance_document' | 'warranty' | 'manual' | 'fica_compliance' | 'other'
+          file_url?: string | null
+          file_size?: number | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          asset_id?: string
+          owner_id?: string
+          document_name?: string
+          document_type?: 'proof_of_purchase' | 'insurance_document' | 'warranty' | 'manual' | 'fica_compliance' | 'other'
+          file_url?: string | null
+          file_size?: number | null
+          created_at?: string | null
+        }
+      }
       categories: {
         Row: {
           id: string
           name: string
           description: string | null
+          owner_id: string | null
           created_at: string
         }
         Insert: {
           id?: string
           name: string
           description?: string | null
+          owner_id?: string | null
           created_at?: string
         }
         Update: {
           id?: string
           name?: string
           description?: string | null
+          owner_id?: string | null
           created_at?: string
         }
       }

@@ -30,7 +30,7 @@ export default function Dashboard() {
         if (assets) {
           const assigned = assets.filter(a => a.status === 'assigned').length;
           const maintenance = assets.filter(a => a.status === 'maintenance').length;
-          const totalValue = assets.reduce((sum, asset) => sum + (asset.value || 0), 0);
+          const totalValue = assets.reduce((sum, asset) => sum + (asset.asset_value_zar || 0), 0);
           
           setStats({
             totalAssets: assets.length,
@@ -183,7 +183,7 @@ export default function Dashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {asset.value ? formatCurrency(asset.value) : '-'}
+                      {asset.asset_value_zar ? formatCurrency(asset.asset_value_zar) : '-'}
                     </td>
                   </tr>
                 ))}
