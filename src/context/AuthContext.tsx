@@ -44,6 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
 
         if (insertError) {
+          // Handle the specific case where profile already exists (race condition)
+          if (insertError.code === '23505') {
+            // Profile was created by another concurrent operation, this is fine
+            return;
+          }
           console.error('Error creating profile:', insertError);
           // Don't throw here - profile creation failure shouldn't block auth
         }
