@@ -27,7 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('id', user.id)
         .maybeSingle();
 
-      if (!existingProfile && !fetchError) {
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Error checking profile:', fetchError);
+        return;
+      }
+
+      if (!existingProfile) {
         // Profile doesn't exist, create it
         const { error: insertError } = await supabase
           .from('profiles')
@@ -40,106 +45,138 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (insertError) {
           console.error('Error creating profile:', insertError);
+          // Don't throw here - profile creation failure shouldn't block auth
         }
-      } else if (fetchError) {
-        console.error('Error checking profile:', fetchError);
       }
     } catch (error) {
       console.error('Error ensuring profile exists:', error);
+      // Don't throw here - profile creation failure shouldn't block auth
     }
   };
 
   useEffect(() => {
+    let mounted = true;
+
     const getSession = async () => {
-      setLoading(true);
-      
       try {
         const { data: { session }, error } = await supabase.auth.getSession();
         
-        if (session?.user) {
-          await ensureProfileExists(session.user);
+        if (!mounted) return;
+
+        if (error) {
+          console.error('Error getting session:', error);
+          // Clear any invalid tokens
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+        } else if (session?.user) {
+          // Don't await profile creation to avoid blocking
+          ensureProfileExists(session.user);
           setSession(session);
           setUser(session.user);
         } else {
-          // Clear any stale tokens when no valid session is found
-          await supabase.auth.signOut();
           setSession(null);
           setUser(null);
         }
       } catch (error) {
-        console.error('Error getting session:', error);
-        // Clear stale tokens on error
-        await supabase.auth.signOut();
-        setSession(null);
-        setUser(null);
+        console.error('Error in getSession:', error);
+        if (mounted) {
+          setSession(null);
+          setUser(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-      
-      setLoading(false);
     };
 
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!mounted) return;
+
         try {
           if (session?.user && event !== 'SIGNED_OUT' && event !== 'USER_DELETED') {
-            await ensureProfileExists(session.user);
+            // Don't await profile creation to avoid blocking
+            ensureProfileExists(session.user);
             setSession(session);
             setUser(session.user);
           } else {
-            // Clear stale tokens when session becomes invalid or user signs out
-            if (event !== 'SIGNED_OUT' && event !== 'USER_DELETED') {
-              await supabase.auth.signOut();
-            }
             setSession(null);
             setUser(null);
           }
         } catch (error) {
           console.error('Error in auth state change:', error);
-          // Clear stale tokens on error
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
+          if (mounted) {
+            setSession(null);
+            setUser(null);
+          }
+        } finally {
+          if (mounted) {
+            setLoading(false);
+          }
         }
-        
-        setLoading(false);
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email, 
+        password 
+      });
+      
+      if (error) {
+        return { error };
+      }
+
+      // Profile creation will be handled by the auth state change listener
+      return { error: null };
+    } catch (error) {
+      return { error };
+    }
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { data, error } = await supabase.auth.signUp({ 
-      email, 
-      password,
-      options: {
-        data: {
-          full_name: fullName,
+    try {
+      const { data, error } = await supabase.auth.signUp({ 
+        email, 
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
         },
-      },
-    });
-
-    if (!error && data?.user) {
-      // Create a profile for the new user
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        email: email,
-        full_name: fullName,
-        role: 'admin', // Default role for new users
       });
-    }
 
-    return { error, user: data?.user };
+      if (error) {
+        return { error, user: null };
+      }
+
+      // Profile creation will be handled by the auth state change listener
+      return { error: null, user: data?.user };
+    } catch (error) {
+      return { error, user: null };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Error signing out:', error);
+      }
+    } catch (error) {
+      console.error('Error in signOut:', error);
+    }
   };
 
   const value = {
