@@ -315,7 +315,9 @@ export default function InsuranceTracker({ assetId }: InsuranceTrackerProps) {
                     <DollarSign className="h-4 w-4 text-slate-400 mr-2" />
                     <div>
                       <p className="text-sm font-medium text-slate-700">Coverage</p>
-                      <p className="text-sm text-slate-900">R {insurance.coverage_amount.toLocaleString()}</p>
+                      <p className="text-sm text-slate-900">
+                        R {insurance.coverage_amount != null ? insurance.coverage_amount.toLocaleString() : 'Not specified'}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -325,7 +327,9 @@ export default function InsuranceTracker({ assetId }: InsuranceTrackerProps) {
                     <DollarSign className="h-4 w-4 text-slate-400 mr-2" />
                     <div>
                       <p className="text-sm font-medium text-slate-700">Premium</p>
-                      <p className="text-sm text-slate-900">R {insurance.premium_amount.toLocaleString()}</p>
+                      <p className="text-sm text-slate-900">
+                        R {insurance.premium_amount != null ? insurance.premium_amount.toLocaleString() : 'Not specified'}
+                      </p>
                     </div>
                   </div>
                 )}
