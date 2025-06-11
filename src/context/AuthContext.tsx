@@ -25,9 +25,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('id')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (fetchError && fetchError.code === 'PGRST116') {
+      if (!existingProfile && !fetchError) {
         // Profile doesn't exist, create it
         const { error: insertError } = await supabase
           .from('profiles')
